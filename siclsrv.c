@@ -13,6 +13,7 @@
 #include <netdb.h> 
 #include <netinet/in.h> 
 #include <sys/socket.h> 
+#include <sys/select.h> 
 
 #define SA struct sockaddr 
 
@@ -78,7 +79,10 @@ int igetintfsess_f (int nargs, char ** argl, int * arglens, int nret, char **ret
        int id = atoi(argl[0]);
        int res = -1;
        if (boardaddr != -1) res = xboardaddr;
-       else res = ibfind(boardId);
+       else {
+         if (deb > 1) fprintf(stderr, "find board %s\n", boardId);
+         res = ibfind(boardId);
+       }
        if (deb > 1) fprintf(stderr, "igetintfses %d res %d\n", id, res);
        return res;
 }
@@ -150,7 +154,29 @@ int itimeout_f(int nargs, char **argl, int * arglens, int nret, char **retl, int
        else if (tmo > 10000 && tmo <= 30000) tmo = 14; 
        else if (tmo > 30000) tmo = 15; 
        if (deb > 1) fprintf (stderr, "itimeout %d %d\n", id, tmo);
-       res = ibtmo(id, tmo);
+       //res = ibtmo(id, tmo);
+       res = ibconfig((id), IbcTMO, (tmo));
+
+       if (res & ERR) res = -1;
+       else res = 0;
+       return res;
+}
+
+int itermchr_f(int nargs, char **argl, int * arglens, int nret, char **retl, int * retlens)
+{
+       int id = atoi(argl[0]);
+       int tchr = atoi(argl[1]);
+       int res = -1;
+       if (id == xboardaddr) id = boardaddr;
+       if (tchr != -1) {
+         //res = ibeos(id, 0x14| tchr);
+         res = ibconfig((id), IbcEOSrd, 1);
+         res = ibconfig((id), IbcEOSchar, tchr);
+       } else {
+         //res = ibeos(id, 0);
+         res = ibconfig((id), IbcEOSrd, 0);
+         res = ibconfig((id), IbcEOSchar, 0);
+       }
        if (res & ERR) res = -1;
        else res = 0;
        return res;
@@ -282,6 +308,7 @@ fcall_t fns [] = {{"iopen", iopen_f, 1, 0 },
                   {"iclose", iclose_f, 1, 0 },
                   {"ihint", ihint_f, 2, 0},
                   {"itimeout", itimeout_f, 2, 0},
+                  {"itermchr", itermchr_f, 2, 0},
                   {"igpibbusstatus", igpibbusstatus_f, 2, 1},
                   {"igpibppoll", igpibppoll_f, 1, 1},
                   {"igpibsendcmd", igpibsendcmd_f, 3, 0},
@@ -370,7 +397,7 @@ int parsargs(char * buf, int sz, fnargs_t * fnap)
           fnap->argl[fnap->nargs] = fnap->argp +1;
           fnap->bufp = fnap->argl[fnap->nargs]+ fnap->arglen[fnap->nargs];
           if (fnap->bufp - buf > sz) {
-             fprintf (stderr, "underrun %d %d\n", fnap->bufp -buf, sz); 
+             fprintf (stderr, "underrun %ld %d\n", fnap->bufp -buf, sz); 
              return -1;
           }
           fnap->argp=fnap->bufp -1;
@@ -475,6 +502,9 @@ int main(int argc, char **argv)
   char buf[8192];
   char wbuf[255];
   int sockfd, connfd; 
+  fd_set read_fds;
+  int nfds;
+  struct timeval tv;
   int port;
   char * addr;
   int  ch;
@@ -569,9 +599,27 @@ int main(int argc, char **argv)
     do {
      nr = 0;
      do {
-       int n = read(sfifo, buf+nr, 8192);
-       if (n <= 0) break;
-       nr += n;
+       FD_ZERO(&read_fds);
+       FD_SET(sfifo, &read_fds);
+       tv.tv_sec = 2;
+       tv.tv_usec = 0;
+       if((nfds = select(sfifo+1, &read_fds, NULL, NULL, &tv)) < 0) {
+          perror("select()");
+       };
+       if (nfds == 0) {
+          short srqi;
+          if (deb > 2) fprintf(stderr, "testing SRQ..\n");
+          TestSRQ (boardnum, &srqi);
+          if (srqi) {
+             if (deb > 1) fprintf(stderr, "SRQ..\n");
+             write(cfifo, "SRQ\n", 4); 
+          }
+          continue;
+       } else { 
+          int n = read(sfifo, buf+nr, 8192);
+          if (n <= 0) break;
+          nr += n;
+       }
      } while (buf[nr-1] != '\n'); 
      buf[nr] = 0;
      if (deb > 2) {
