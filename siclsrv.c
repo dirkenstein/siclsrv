@@ -505,7 +505,7 @@ int main(int argc, char **argv)
   fd_set read_fds;
   int nfds;
   struct timeval tv;
-  int port;
+  int port = 2020;
   char * addr;
   int  ch;
   
@@ -556,7 +556,7 @@ int main(int argc, char **argv)
       // assign IP, PORT 
       servaddr.sin_family = AF_INET; 
       servaddr.sin_addr.s_addr = htonl(INADDR_ANY); 
-      servaddr.sin_port = htons(2020); 
+      servaddr.sin_port = htons(port); 
     
       // Binding newly created socket to given IP and verification 
       if ((bind(sockfd, (SA*)&servaddr, sizeof(servaddr))) != 0) { 
